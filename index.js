@@ -1,5 +1,5 @@
 const axios = require('axios');
-const cheerio = require('cheerio');
+const { parse } = require('node-html-parser');
 
 const PHONE = '917095083900';
 const CALLMEBOT_KEY = process.env.CALLMEBOT_APIKEY;
@@ -11,7 +11,7 @@ const TARGETS = [
     name: 'BookMyShow IPL',
     url: 'https://in.bookmyshow.com/explore/c/ipl',
     keywords: ['book tickets','buy now','get tickets','tickets available','sale live','register now','book now'],
-    negativeKeywords: ['too early to the party','couldn\'t find']
+    negativeKeywords: ['too early to the party']
   },
   {
     name: 'BookMyShow MI Pre-Reg',
@@ -22,7 +22,7 @@ const TARGETS = [
   {
     name: 'District by Zomato',
     url: 'https://www.district.in/events/ipl-ticket-booking',
-    keywords: ['book tickets','buy now','get tickets','tickets available','sale live','register','book now'],
+    keywords: ['book tickets','buy now','get tickets','tickets available','sale live','book now'],
     negativeKeywords: []
   },
   {
@@ -52,8 +52,8 @@ const TARGETS = [
 ];
 
 async function sendWhatsApp(message) {
-  if (!CALLMEBOT_KEY) {
-    console.log('[WhatsApp] No API key - msg:', message.substring(0, 80));
+  if (!CALLMEBOT_KEY || CALLMEBOT_KEY.startsWith('AWAITING') || CALLMEBOT_KEY.startsWith('PENDING')) {
+    console.log('[WhatsApp] No valid API key yet. Message:', message.substring(0, 100));
     return;
   }
   try {
@@ -76,8 +76,8 @@ async function checkTarget(target) {
         'Accept': 'text/html,application/xhtml+xml'
       }
     });
-    const $ = cheerio.load(data);
-    const bodyText = $('body').text().toLowerCase();
+    const root = parse(data);
+    const bodyText = (root.querySelector('body') || root).text.toLowerCase();
     const hasNegative = target.negativeKeywords.some(kw => bodyText.includes(kw.toLowerCase()));
     if (hasNegative) return { live: false, source: target.name };
     const matchedKw = target.keywords.find(kw => bodyText.includes(kw.toLowerCase()));
@@ -102,8 +102,7 @@ async function runChecks() {
   const liveResults = [];
   for (const target of TARGETS) {
     const result = await checkTarget(target);
-    const icon = result.live ? 'LIVE' : 'not live';
-    console.log(`  [${icon}] ${result.source}`);
+    console.log(`  [${result.live ? 'LIVE!' : 'not live'}] ${result.source}`);
     if (result.live && !alerted[result.source]) {
       liveResults.push(result);
     }
@@ -118,14 +117,13 @@ async function runChecks() {
     console.log('[ALERT] Sending WhatsApp alert!');
     await sendWhatsApp(msg);
   }
-  console.log(`[Check #${checkCount}] Done.`);
+  console.log(`[Check #${checkCount}] Complete.`);
 }
 
 async function sendStatusUpdate() {
-  const liveCount = Object.keys(alerted).length;
-  if (liveCount === 0) {
+  if (Object.keys(alerted).length === 0) {
     const ts = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
-    await sendWhatsApp(`\u23F0 IPL Ticket Agent - Still monitoring all 7 platforms.\nNo tickets live yet as of ${ts} IST.\nI will alert you the second they drop! \u{1F3CF}`);
+    await sendWhatsApp(`\u23F0 IPL Ticket Agent - Still monitoring all 7 platforms.\nNo tickets live yet as of ${ts} IST.\nWill alert you the second they drop! \u{1F3CF}`);
   }
 }
 
@@ -133,7 +131,8 @@ async function sendStatusUpdate() {
   console.log('\u{1F3CF} IPL Ticket Monitor Agent STARTING...');
   console.log(`   Checking ${TARGETS.length} platforms every 4 minutes`);
   console.log(`   WhatsApp alerts to +${PHONE}`);
-  await sendWhatsApp('\u2705 IPL Ticket Alert Agent is now ACTIVE - you will get direct booking links instantly when tickets drop \u{1F3CF}\n\nMonitoring every 4 minutes:\n- BookMyShow IPL\n- BookMyShow MI Pre-Reg (Registration LIVE NOW!)\n- District by Zomato\n- Paytm Insider\n- IPL Official Site\n- Cricbuzz\n- ESPNcricinfo\n\nStatus updates every 30 min.');
+  console.log(`   CallMeBot key present: ${!!CALLMEBOT_KEY}`);
+  await sendWhatsApp('\u2705 IPL Ticket Alert Agent is now ACTIVE - you will get direct booking links instantly when tickets drop \u{1F3CF}\n\nMonitoring every 4 minutes:\n- BookMyShow IPL\n- BookMyShow MI Pre-Reg\n- District by Zomato\n- Paytm Insider\n- IPL Official Site\n- Cricbuzz\n- ESPNcricinfo\n\nStatus updates every 30 min.');
   await runChecks();
   setInterval(runChecks, CHECK_INTERVAL_MS);
   setInterval(sendStatusUpdate, STATUS_INTERVAL_MS);
